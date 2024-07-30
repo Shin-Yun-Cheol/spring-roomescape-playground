@@ -1,5 +1,7 @@
 package roomescape;
 
+import roomescape.exception.InvalidReservationException;
+import roomescape.exception.NotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +32,12 @@ public class ReservationController {
     @PostMapping("/reservations")
     @ResponseBody
     public ResponseEntity<Void> createReservation(@RequestBody Reservation reservation) {
+        if (reservation.getName() == null || reservation.getName().isEmpty() ||
+                reservation.getDate() == null || reservation.getDate().isEmpty() ||
+                reservation.getTime() == null || reservation.getTime().isEmpty()) {
+            throw new InvalidReservationException("Invalid reservation details");
+        }
+
         Reservation newReservation = Reservation.toEntity(reservation, index.getAndIncrement());
         reservations.add(newReservation);
         return ResponseEntity.created(URI.create("/reservations/" + newReservation.getId())).build();
@@ -46,7 +54,7 @@ public class ReservationController {
             reservations.remove(reservation.get());
             return ResponseEntity.noContent().build();
         } else {
-            return ResponseEntity.notFound().build();
+            throw new NotFoundException("Reservation not found");
         }
     }
 }
