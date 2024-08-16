@@ -1,22 +1,32 @@
 package roomescape;
 
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import roomescape.exception.InvalidReservationException;
 import roomescape.exception.NotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.ArrayList;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Controller
 public class ReservationController {
 
-    private final List<Reservation> reservations = new ArrayList<>();
-    private final AtomicLong index = new AtomicLong(1);
+    private final JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    public ReservationController(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
     @GetMapping("/reservation")
     public String reservation() {
@@ -26,6 +36,8 @@ public class ReservationController {
     @GetMapping("/reservations")
     @ResponseBody
     public ResponseEntity<List<Reservation>> readReservations() {
+        String sql = "SELECT id, name, date, time FROM reservation";
+        List<Reservation> reservations = jdbcTemplate.query(sql, new ReservationRowMapper());
         return ResponseEntity.ok().body(reservations);
     }
 
@@ -38,23 +50,46 @@ public class ReservationController {
             throw new InvalidReservationException("Invalid reservation details");
         }
 
-        Reservation newReservation = Reservation.toEntity(reservation, index.getAndIncrement());
-        reservations.add(newReservation);
-        return ResponseEntity.created(URI.create("/reservations/" + newReservation.getId())).build();
+        String sql = "INSERT INTO reservation (name, date, time) VALUES (?, ?, ?)";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, reservation.getName());
+            ps.setString(2, reservation.getDate());
+            ps.setString(3, reservation.getTime());
+            return ps;
+        }, keyHolder);
+
+        Number key = keyHolder.getKey();
+        URI location = URI.create("/reservations/" + key.longValue());
+        return ResponseEntity.created(location).build();
     }
+
 
     @DeleteMapping("/reservations/{id}")
     @ResponseBody
     public ResponseEntity<Void> deleteReservation(@PathVariable long id) {
-        Optional<Reservation> reservation = reservations.stream()
-                .filter(r -> r.getId() == id)
-                .findFirst();
+        String sql = "DELETE FROM reservation WHERE id = ?";
+        int rowsAffected = jdbcTemplate.update(sql, id);
 
-        if (reservation.isPresent()) {
-            reservations.remove(reservation.get());
+        if (rowsAffected > 0) {
             return ResponseEntity.noContent().build();
         } else {
             throw new NotFoundException("Reservation not found");
+        }
+    }
+
+
+    // RowMapper 이용하기
+    private static class ReservationRowMapper implements RowMapper<Reservation> {
+        @Override
+        public Reservation mapRow(ResultSet rs, int rowNum) throws SQLException {
+            return new Reservation(
+                    rs.getLong("id"),
+                    rs.getString("name"),
+                    rs.getString("date"),
+                    rs.getString("time")
+            );
         }
     }
 }
